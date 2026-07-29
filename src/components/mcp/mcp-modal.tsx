@@ -67,6 +67,14 @@ const INTEGRATIONS: IntegrationConfig[] = [
         docsUrl: 'https://modelcontextprotocol.io/quickstart/user'
     },
     {
+        id: 'codex',
+        name: 'Codex',
+        description: 'Register HTTP Toolkit as an MCP server in Codex by running this command in your terminal:',
+        buildSnippet: ({ command, args }) =>
+            `codex mcp add http-toolkit -- ${[command, ...args].map(shellEscape).join(' ')}`,
+        docsUrl: 'https://developers.openai.com/codex/mcp/'
+    },
+    {
         id: 'vscode',
         name: 'VS Code',
         description: 'Use HTTP Toolkit from GitHub Copilot in VS Code by adding the following to .vscode/mcp.json in your project (or your user mcp.json):',
@@ -79,13 +87,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
         description: 'Use HTTP Toolkit from Cursor\'s AI features by adding the following to ~/.cursor/mcp.json (or .cursor/mcp.json in your project):',
         buildSnippet: jsonClientConfig,
         docsUrl: 'https://docs.cursor.com/context/mcp'
-    },
-    {
-        id: 'windsurf',
-        name: 'Windsurf',
-        description: 'Use HTTP Toolkit from Windsurf\'s Cascade by adding the following to ~/.codeium/windsurf/mcp_config.json:',
-        buildSnippet: jsonClientConfig,
-        docsUrl: 'https://docs.windsurf.com/windsurf/cascade/mcp'
     },
     {
         id: 'generic',
