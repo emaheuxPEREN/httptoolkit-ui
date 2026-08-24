@@ -19,6 +19,18 @@ export function registerRuleOperations(
     rulesStore: RulesStore
 ): void {
     registry.register(rulesListOperation(rulesStore));
+
+    registry.register(ruleActivationOperation(rulesStore, true,
+        'Activate a rule, or every rule within a group, so that it applies to matching traffic ' +
+        'again. This takes effect immediately, without requiring the rules to be saved in the UI.'
+    ));
+
+    registry.register(ruleActivationOperation(rulesStore, false,
+        'Deactivate a rule, or every rule within a group, so that it no longer affects any ' +
+        'traffic. Deactivated rules stay configured and can be reactivated later with ' +
+        'rules.activate. This takes effect immediately, without requiring the rules to be ' +
+        'saved in the UI.'
+    ));
 }
 
 // WebRTC rules are matched by MockRTC, which has no equivalent priority concept:
@@ -127,6 +139,72 @@ function rulesListOperation(rulesStore: RulesStore): Operation {
                     rules: summarizeRuleItems(rulesStore.draftRules.items),
                     unsavedChanges: rulesStore.areSomeRulesUnsaved
                 }
+            };
+        }
+    };
+}
+
+function ruleActivationOperation(
+    rulesStore: RulesStore,
+    activated: boolean,
+    description: string
+): Operation {
+    const verb = activated ? 'activate' : 'deactivate';
+
+    return {
+        definition: {
+            name: `rules.${verb}`,
+            description,
+            category: 'rules',
+            tiers: ['pro'],
+            annotations: { readOnlyHint: false, idempotentHint: true },
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    id: {
+                        type: 'string',
+                        description: `The id of the rule or group to ${verb}, as returned by rules.list`
+                    }
+                },
+                required: ['id']
+            },
+            outputSchema: {
+                type: 'object',
+                properties: {
+                    rulesUpdated: {
+                        type: 'number',
+                        description: 'The number of rules this was applied to'
+                    }
+                }
+            }
+        },
+        handler: async (params) => {
+            const { id } = params;
+
+            if (!id || typeof id !== 'string') {
+                return {
+                    success: false,
+                    error: { code: 'INVALID_PARAMS', message: 'Missing required parameter: id' }
+                };
+            }
+
+            // The rule may exist only in the drafts (if it's new) or only in the active rules
+            // (if it's been deleted in the drafts, but that's not saved yet):
+            const item = findItem(rulesStore.draftRules, { id })
+                ?? findItem(rulesStore.rules, { id });
+
+            // The root isn't exposed by rules.list, so we don't accept it here either. Guessing
+            // it shouldn't be a way to accidentally deactivate every rule at once.
+            if (!item || isRuleRoot(item)) {
+                return {
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: `No rule or group found with id: ${id}` }
+                };
+            }
+
+            return {
+                success: true,
+                data: { rulesUpdated: rulesStore.setItemActivated(id, activated) }
             };
         }
     };

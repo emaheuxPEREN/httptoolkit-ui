@@ -45,6 +45,7 @@ import {
 import {
     HtkRuleGroup,
     flattenRules,
+    mapRules,
     ItemPath,
     isRuleGroup,
     getItemAtPath,
@@ -696,6 +697,29 @@ export class RulesStore {
 
         draftGroup.title = newTitle;
         if (activeGroup) activeGroup.title = newTitle;
+    }
+
+    @action.bound
+    setItemActivated(itemId: string, activated: boolean): number {
+        const updatedRuleIds = new Set<string>();
+
+        // Updates active & draft rules directly (no save required)
+        [this.draftRules, this.rules].forEach((ruleRoot) => {
+            const item = findItem(ruleRoot, { id: itemId });
+            if (!item) return;
+
+            if (isRuleGroup(item)) {
+                mapRules(item, (rule) => {
+                    rule.activated = activated;
+                    updatedRuleIds.add(rule.id);
+                });
+            } else {
+                item.activated = activated;
+                updatedRuleIds.add(item.id);
+            }
+        });
+
+        return updatedRuleIds.size;
     }
 
     @action.bound

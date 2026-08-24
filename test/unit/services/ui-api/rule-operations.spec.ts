@@ -186,4 +186,161 @@ describe("Rule API operations", () => {
         });
     });
 
+    const ALL_RULE_IDS = ['mock-rule', 'grouped-rule', 'nested-rule'];
+
+    const activeRuleIds = () => flattenRules(store.rules)
+        .filter(r => r.activated)
+        .map(r => r.id);
+    const draftRuleIds = () => flattenRules(store.draftRules)
+        .filter(r => r.activated)
+        .map(r => r.id);
+
+    describe("rules.deactivate", () => {
+        it("deactivates a rule in both the draft & active rules", async () => {
+            const result = await registry.execute('rules.deactivate', { id: 'mock-rule' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 1 });
+            expect(activeRuleIds()).to.deep.equal(['grouped-rule', 'nested-rule']);
+            expect(draftRuleIds()).to.deep.equal(['grouped-rule', 'nested-rule']);
+        });
+
+        it("does not leave the rules unsaved, so the change is live", async () => {
+            await registry.execute('rules.deactivate', { id: 'mock-rule' });
+
+            expect(store.areSomeRulesUnsaved).to.equal(false);
+        });
+
+        it("notifies observers of the active rules, so the proxy is updated", async () => {
+            // This mirrors the reaction in RulesStore.initialized() that pushes the active
+            // rules to the proxy, to check that deactivation really does reach live traffic:
+            const activeRuleUpdates: string[][] = [];
+            const disposeReaction = reaction(
+                () => flattenRules(store.rules)
+                    .filter(r => r.activated && r.matchers.length)
+                    .map(r => r.id),
+                (ruleIds) => { activeRuleUpdates.push(ruleIds) }
+            );
+
+            try {
+                await registry.execute('rules.deactivate', { id: 'mock-rule' });
+
+                expect(activeRuleUpdates).to.deep.equal([['grouped-rule', 'nested-rule']]);
+            } finally {
+                disposeReaction();
+            }
+        });
+
+        it("deactivates every rule in a group, including nested groups", async () => {
+            const result = await registry.execute('rules.deactivate', { id: 'a-group' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 2 });
+            expect(activeRuleIds()).to.deep.equal(['mock-rule']);
+            expect(draftRuleIds()).to.deep.equal(['mock-rule']);
+        });
+
+        it("deactivates every rule in a nested group", async () => {
+            const result = await registry.execute('rules.deactivate', { id: 'nested-group' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 1 });
+            expect(activeRuleIds()).to.deep.equal(['mock-rule', 'grouped-rule']);
+        });
+
+        it("updates a rule that exists only as an unsaved draft", async () => {
+            store.draftRules.items.push(buildRule('new-rule', new StaticResponseStep(404)));
+
+            const result = await registry.execute('rules.deactivate', { id: 'new-rule' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 1 });
+            expect(draftRuleIds()).to.deep.equal(ALL_RULE_IDS);
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("rejects the root id, so every rule can't be deactivated by guessing", async () => {
+            const result = await registry.execute('rules.deactivate', { id: 'root' });
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('NOT_FOUND');
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("rejects unknown ids", async () => {
+            const result = await registry.execute('rules.deactivate', { id: 'not-a-rule' });
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('NOT_FOUND');
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("rejects a missing id", async () => {
+            const result = await registry.execute('rules.deactivate', {});
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('INVALID_PARAMS');
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("requires a paid account", async () => {
+            const freeRegistry = new OperationRegistry(() => false);
+            registerRuleOperations(freeRegistry, store);
+
+            const result = await freeRegistry.execute('rules.deactivate', { id: 'mock-rule' });
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('TIER_REQUIRED_PRO');
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+    });
+
+    describe("rules.activate", () => {
+        it("reactivates a deactivated rule", async () => {
+            await registry.execute('rules.deactivate', { id: 'mock-rule' });
+
+            const result = await registry.execute('rules.activate', { id: 'mock-rule' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 1 });
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+            expect(draftRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("reactivates every rule in a group, including nested groups", async () => {
+            await registry.execute('rules.deactivate', { id: 'a-group' });
+
+            const result = await registry.execute('rules.activate', { id: 'a-group' });
+
+            expect(result.success).to.equal(true);
+            expect(result.data).to.deep.equal({ rulesUpdated: 2 });
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+        });
+
+        it("does nothing to an already active rule", async () => {
+            const result = await registry.execute('rules.activate', { id: 'mock-rule' });
+
+            expect(result.success).to.equal(true);
+            expect(activeRuleIds()).to.deep.equal(ALL_RULE_IDS);
+            expect(store.areSomeRulesUnsaved).to.equal(false);
+        });
+
+        it("rejects unknown ids", async () => {
+            const result = await registry.execute('rules.activate', { id: 'not-a-rule' });
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('NOT_FOUND');
+        });
+
+        it("requires a paid account", async () => {
+            const freeRegistry = new OperationRegistry(() => false);
+            registerRuleOperations(freeRegistry, store);
+
+            const result = await freeRegistry.execute('rules.activate', { id: 'mock-rule' });
+
+            expect(result.success).to.equal(false);
+            expect(result.error!.code).to.equal('TIER_REQUIRED_PRO');
+        });
+    });
+
 });
