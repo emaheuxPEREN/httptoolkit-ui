@@ -1,6 +1,17 @@
 import { Operation } from '../api-types';
 import { RulesStore } from '../../../model/rules/rules-store';
-import { mapRules } from '../../../model/rules/rules-structure';
+import {
+    HtkRule,
+    RulePriority,
+    isHttpBasedRule,
+    isWebSocketRule
+} from '../../../model/rules/rules';
+import {
+    findItem,
+    isRuleGroup,
+    isRuleRoot,
+    HtkRuleItem
+} from '../../../model/rules/rules-structure';
 import { summarizeMatcher, summarizeSteps } from '../../../model/rules/rule-descriptions';
 
 export function registerRuleOperations(
@@ -10,14 +21,44 @@ export function registerRuleOperations(
     registry.register(rulesListOperation(rulesStore));
 }
 
+// WebRTC rules are matched by MockRTC, which has no equivalent priority concept:
+function getEffectivePriority(rule: HtkRule): number | undefined {
+    if (!isHttpBasedRule(rule) && !isWebSocketRule(rule)) return undefined;
+    return rule.priority ?? RulePriority.DEFAULT;
+}
+
+function summarizeRuleItems(items: ReadonlyArray<HtkRuleItem>): unknown[] {
+    return items.map((item) => isRuleGroup(item)
+        ? {
+            id: item.id,
+            title: item.title,
+            rules: summarizeRuleItems(item.items)
+        }
+        : {
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            activated: item.activated,
+            priority: getEffectivePriority(item),
+            matches: summarizeMatcher(item),
+            steps: summarizeSteps(item)
+        }
+    );
+}
+
 function rulesListOperation(rulesStore: RulesStore): Operation {
     return {
         definition: {
             name: 'rules.list',
             description: 'List the currently configured HTTP Toolkit rules, which define how ' +
                 'matching traffic is mocked, rewritten, breakpointed or otherwise modified. ' +
-                'Rules are listed in priority order, and each is summarized rather than returning ' +
-                'its full configuration.',
+                'Rules are returned in their configured order, within their groups, and each is ' +
+                'summarized rather than returning its full configuration.\n' +
+                '\n' +
+                'Note that this is not the order rules are matched in. Each request is matched ' +
+                'against the highest priority rules first, and only falls through to lower ' +
+                'priorities if none of them match. Within a single priority, rules are matched ' +
+                'in the order returned here, and the first match wins.',
             category: 'rules',
             tiers: ['pro'],
             annotations: { readOnlyHint: true },
@@ -30,29 +71,43 @@ function rulesListOperation(rulesStore: RulesStore): Operation {
                 properties: {
                     rules: {
                         type: 'array',
+                        description: 'Rules and groups of rules, in their configured order',
                         items: {
                             type: 'object',
                             properties: {
                                 id: { type: 'string' },
-                                type: {
-                                    type: 'string',
-                                    description: 'The rule protocol, e.g. "http" or "websocket"'
-                                },
                                 title: {
                                     type: 'string',
-                                    description: 'The rule\'s user-defined title, if it has one'
+                                    description: 'The user-defined title of the rule or group, if it has one'
+                                },
+                                rules: {
+                                    type: 'array',
+                                    description: 'Present only on groups: the rules and nested ' +
+                                        'groups within this group, in the same format as this list'
+                                },
+                                type: {
+                                    type: 'string',
+                                    description: 'Rules only: the rule protocol, e.g. "http" or "websocket"'
                                 },
                                 activated: {
                                     type: 'boolean',
-                                    description: 'Whether the rule is currently enabled'
+                                    description: 'Rules only: whether the rule is currently enabled'
+                                },
+                                priority: {
+                                    type: 'number',
+                                    description: 'Rules only: the priority this rule is matched at. ' +
+                                        'Higher priorities are matched first. 2 means high priority ' +
+                                        '(matched before everything else), 1 is the default, and 0 ' +
+                                        'means fallback (matched only once nothing else has matched). ' +
+                                        'Omitted for WebRTC rules, which are matched separately.'
                                 },
                                 matches: {
                                     type: 'string',
-                                    description: 'Human-readable summary of the traffic this rule matches'
+                                    description: 'Rules only: human-readable summary of the traffic this rule matches'
                                 },
                                 steps: {
                                     type: 'string',
-                                    description: 'Human-readable summary of what this rule does when matched'
+                                    description: 'Rules only: human-readable summary of what this rule does when matched'
                                 }
                             }
                         }
@@ -66,19 +121,10 @@ function rulesListOperation(rulesStore: RulesStore): Operation {
             }
         },
         handler: async () => {
-            const rules = mapRules(rulesStore.draftRules, (rule) => ({
-                id: rule.id,
-                type: rule.type,
-                title: rule.title,
-                activated: rule.activated,
-                matches: summarizeMatcher(rule),
-                steps: summarizeSteps(rule)
-            }));
-
             return {
                 success: true,
                 data: {
-                    rules,
+                    rules: summarizeRuleItems(rulesStore.draftRules.items),
                     unsavedChanges: rulesStore.areSomeRulesUnsaved
                 }
             };
