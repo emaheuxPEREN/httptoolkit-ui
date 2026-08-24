@@ -6,14 +6,16 @@ import { AccountStore } from '../../model/account/account-store';
 import { EventsStore } from '../../model/events/events-store';
 import { ProxyStore } from '../../model/proxy-store';
 import { InterceptorStore } from '../../model/interception/interceptor-store';
+import { RulesStore } from '../../model/rules/rules-store';
 
 export function initializeUiApi(stores: {
     accountStore: AccountStore;
     eventsStore: EventsStore;
     proxyStore: ProxyStore;
     interceptorStore: InterceptorStore;
+    rulesStore: RulesStore;
 }) {
-    const { accountStore, eventsStore, proxyStore, interceptorStore } = stores;
+    const { accountStore, eventsStore, proxyStore, interceptorStore, rulesStore } = stores;
 
     const registry = new OperationRegistry(
         () => accountStore.user.isPaidUser()
@@ -21,7 +23,7 @@ export function initializeUiApi(stores: {
 
     registerAllOperations(
         registry,
-        { eventsStore, proxyStore, interceptorStore, accountStore },
+        { eventsStore, proxyStore, interceptorStore, accountStore, rulesStore },
         () => eventsStore.events
     );
 
