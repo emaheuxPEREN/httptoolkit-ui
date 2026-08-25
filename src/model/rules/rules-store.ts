@@ -300,7 +300,8 @@ export class RulesStore {
             lookupOptions: this.proxyStore.dnsServers.length
                 ? { servers: this.proxyStore.dnsServers }
                 : undefined,
-            simulateConnectionErrors: true
+            simulateConnectionErrors: true,
+            mirrorTlsFingerprint: true
         };
 
         // Clone to ensure we touch & subscribe to everything here
